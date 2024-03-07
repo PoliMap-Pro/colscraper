@@ -1,23 +1,17 @@
-import csv
-import functools
-import glob
 import re
 import os
-
-import pandas
 import requests
+import wordsegment
 
 from bs4 import BeautifulSoup
+from requests.exceptions import MissingSchema, InvalidSchema
 
-FIRST_YEAR = 2000
-LAST_YEAR = 2022
-FEDERAL_YEARS = r"https://www.aec.gov.au/Elections/federal_elections"
-
+ELECTIONS_PAGE = r"https://results.aec.gov.au/"
 MAXIMUM_FILE_SIZE = 2e8
+
 HTML_HEADER_CONTENT_TYPE_KEY = 'content-type'
 HTML_HEADER_CONTENT_LENGTH_KEY = 'content-length'
 HTML_HEADER_CONTENT_DISPOSITION_KEY = 'content-disposition'
-DIRECTORY_DIVIDER_PATTERN = re.compile(r'[^a-zA-Z]+')
 FILENAME_PATTERN = re.compile(r'filename=(.+)')
 
 
@@ -38,44 +32,40 @@ class Inventory(list):
         return list.__iter__(self)
 
     def __call__(self, new_item):
-        if new_item not in self:
-            self.append(new_item)
+        if new_item in self:
+            return False
+        self.append(new_item)
+        return True
 
-    def download_from_url(self, url, target_type="application/octet-stream"):
+    def download_from_url(self, url, check_type=False,
+                          target_type="application/octet-stream"):
         header = requests.head(url, allow_redirects=True).headers
-        content_type = str(header.get(HTML_HEADER_CONTENT_TYPE_KEY)).lower()
-        if content_type == target_type:
-            self._download_target(header, url)
+        if check_type:
+            content_type = str(header.get(HTML_HEADER_CONTENT_TYPE_KEY)).lower()
+            if content_type == target_type:
+                self._download_target(header, url)
+            else:
+                print(f"Didn't download {url}. Wrong type: {content_type}")
         else:
-            self._add_item(f"Didn't download {url}. "
-                          f"Wrong content type: {content_type}")
+            self._download_target(header, url)
 
     def _download_target(self, header, url):
         content_length = float(header.get(HTML_HEADER_CONTENT_LENGTH_KEY, None))
         if content_length and content_length <= MAXIMUM_FILE_SIZE:
             self._download_file(url)
         else:
-            self._add_item(f"Didn't download f{url}. "
-                           f"Size of file exceeds {MAXIMUM_FILE_SIZE}")
+            print(f"Didn't download {url}. Size exceeds {MAXIMUM_FILE_SIZE}")
 
     def _download_file(self, url):
         get_request = requests.get(url, allow_redirects=True)
         filename = Inventory.guess_filename(get_request, url)
         if filename:
-            subdirectories = [section.lower() for section in
-                              DIRECTORY_DIVIDER_PATTERN.split(filename)
-                              if len(section) > 1]
-            target_path = os.path.join(*subdirectories)
+            target_path = os.path.join(*wordsegment.segment(filename.lower()))
             os.makedirs(target_path, exist_ok=True)
             with open(os.path.join(target_path, filename), "wb") as target_file:
                 target_file.write(get_request.content)
         else:
-            self._add_item(f"Didn't download f{url}. Can't guess the filename.")
-
-    def _add_item(self, new_item):
-        if new_item not in self:
-            self(new_item)
-            print(new_item)
+            print(f"Didn't download {url}. Can't guess the filename.")
 
     @staticmethod
     def guess_filename(get_request, url):
@@ -84,15 +74,36 @@ class Inventory(list):
                 get_request.headers[HTML_HEADER_CONTENT_DISPOSITION_KEY])[0]
         return url.split("/")[-1]
 
+    def follow(self, url, verbose=True, level=0, target_extension='.csv',
+               follow_text='download'):
+        if url and self(url):
+            url_split_on_slashes = url.split("/")
+            try:
+                stem = "/".join(url_split_on_slashes[:-1])
+                [self.next_node(
+                    follow_text, level, node, stem, target_extension) for node
+                    in BeautifulSoup(requests.get(url).text, 'html.parser'
+                                     ).find_all('a') if node]
+                if verbose:
+                    print(' '.join([". " * level, url_split_on_slashes[-1]]))
+            except InvalidSchema as schemaException:
+                if verbose:
+                    print(f"Didn't download {url}. {str(schemaException)}")
+            except MissingSchema:
+                pass
+
+    def next_node(self, follow_text, level, node, stem, target_extension):
+        node_get = node.get('href')
+        if node_get:
+            next_url = f"{stem}/{node_get}"
+            if node.string and follow_text in node.string.lower():
+                self.follow(next_url, level=level+1)
+            if node_get.endswith(target_extension):
+                inv.download_from_url(next_url)
+
 
 if __name__ == "__main__":
+    wordsegment.load()
     inv = Inventory()
-    for year in range(FIRST_YEAR, LAST_YEAR + 1):
-        year_url = f"{FEDERAL_YEARS}/{year}"
-        soup = BeautifulSoup(requests.get(f"{year_url}/downloads.htm").text,
-                             'html.parser')
-        for node in soup.find_all('a'):
-            href_get = node.get('href')
-            if href_get:
-                if href_get.endswith('.csv'):
-                    inv.download_from_url(f"{year_url}/{node.get('href')}")
+    [inv.follow(req_node.get('href')) for req_node in BeautifulSoup(
+        requests.get(ELECTIONS_PAGE).text, 'html.parser').find_all('a')]
