@@ -92,12 +92,13 @@ class Inventory(list):
             except MissingSchema:
                 pass
 
-    def next_node(self, follow_text, level, node, stem, target_extension):
+    def next_node(self, follow_text, level, node, stem, target_extension,
+                  verbose):
         node_get = node.get('href')
         if node_get:
             next_url = f"{stem}/{node_get}"
             if node.string and follow_text in node.string.lower():
-                self.follow(next_url, level=level+1)
+                self.follow(next_url, level=level+1, verbose=verbose)
             if node_get.endswith(target_extension):
                 inv.download_from_url(next_url)
 
