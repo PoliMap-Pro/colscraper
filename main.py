@@ -74,16 +74,16 @@ class Inventory(list):
                 get_request.headers[HTML_HEADER_CONTENT_DISPOSITION_KEY])[0]
         return url.split("/")[-1]
 
-    def follow(self, url, verbose=True, level=0, target_extension='.csv',
+    def follow(self, url, verbose=True, level=0, targ_ext='.csv',
                follow_text='download'):
         if url and self(url):
             url_split_on_slashes = url.split("/")
             try:
                 stem = "/".join(url_split_on_slashes[:-1])
                 [self.next_node(
-                    follow_text, level, node, stem, target_extension) for node
-                    in BeautifulSoup(requests.get(url).text, 'html.parser'
-                                     ).find_all('a') if node]
+                    follow_text, level, node, stem, targ_ext, verbose) for
+                    node in BeautifulSoup(requests.get(url).text,
+                                          'html.parser').find_all('a') if node]
                 if verbose:
                     print(' '.join([". " * level, url_split_on_slashes[-1]]))
             except InvalidSchema as schemaException:
