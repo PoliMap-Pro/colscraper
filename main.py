@@ -11,6 +11,7 @@ FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
 DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
 DO_NOT_GO_TO_PLACES_STARTING_WITH = ('#', )
+MAX_DEPTH = 20
 MAXIMUM_FILE_SIZE = 2e8
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
 
@@ -102,22 +103,23 @@ class Inventory(list):
         return url.split("/")[-1]
 
     def follow(self, url, folders, verb=True, lev=0, ext='.csv',
-               ftext=FOLLOW_LINKS_CONTAINING):
+               ftext=FOLLOW_LINKS_CONTAINING, max_depth=MAX_DEPTH):
         if url and self(url):
-            try:
-                url_split_on_slashes = url.split("/")
-                stem = "/".join(url_split_on_slashes[:-1])
-                [self.next_node(
-                    ftext, lev, node, stem, ext, verb, folders) for node in
-                    BeautifulSoup(requests.get(url).text,
-                                  'html.parser').find_all('a') if node]
-                if verb:
-                    print(' '.join([". " * lev, url_split_on_slashes[-1]]))
-            except (InvalidSchema, ParserRejectedMarkup) as schemaException:
-                if verb:
-                    print(f"Didn't download {url}. {str(schemaException)}")
-            except MissingSchema:
-                pass
+            if lev < max_depth:
+                try:
+                    url_split_on_slashes = url.split("/")
+                    stem = "/".join(url_split_on_slashes[:-1])
+                    [self.next_node(
+                        ftext, lev, node, stem, ext, verb, folders) for node in
+                        BeautifulSoup(requests.get(url).text,
+                                      'html.parser').find_all('a') if node]
+                    if verb:
+                        print(' '.join([". " * lev, url_split_on_slashes[-1]]))
+                except (InvalidSchema, ParserRejectedMarkup) as schemaException:
+                    if verb:
+                        print(f"Didn't download {url}. {str(schemaException)}")
+                except MissingSchema:
+                    pass
 
     def next_node(self, ftext, lev, node, stem, ext, verb, fld,
                   mlink=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
