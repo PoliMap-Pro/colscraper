@@ -1,13 +1,13 @@
 import re
 import os
-from ssl import SSLCertVerificationError
+import urllib3
+import ssl
 
 import requests
 import wordsegment
 
 from bs4 import BeautifulSoup, ParserRejectedMarkup
-from requests.exceptions import MissingSchema, InvalidSchema, SSLError
-from urllib3.exceptions import MaxRetryError
+from requests.exceptions import MissingSchema, InvalidSchema
 
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
@@ -15,6 +15,7 @@ DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
 DO_NOT_GO_TO_PLACES_STARTING_WITH = ('ftp:', )
 MAX_DEPTH = 20
 MAXIMUM_FILE_SIZE = 2e8
+
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
 
 #State top pages
@@ -120,8 +121,11 @@ class Inventory(list):
                 except (InvalidSchema, ParserRejectedMarkup) as schemaException:
                     if verb:
                         print(f"Didn't download {url}. {str(schemaException)}")
-                except (MissingSchema, SSLCertVerificationError, SSLError,
-                        MaxRetryError):
+                except (MissingSchema,
+                        ssl.SSLCertVerificationError,
+                        requests.exceptions.SSLError,
+                        urllib3.exceptions.SSLError,
+                        urllib3.exceptions.MaxRetryError):
                     pass
 
     def next_node(self, ftext, lev, node, stem, ext, verb, fld,
@@ -134,7 +138,7 @@ class Inventory(list):
             elif node.string:
                 if (not any([node_get.endswith(skipped) for
                              skipped in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
-                        not any([node_get.startswith(skipped) for skipped in
+                        not any([next_url.startswith(skipped) for skipped in
                                  DO_NOT_GO_TO_PLACES_STARTING_WITH])):
                     if (lev % mlink != 0) or (ftext in node.string.lower()):
                         self.follow(next_url, fld, lev=lev + 1, verb=verb)
