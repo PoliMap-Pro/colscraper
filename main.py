@@ -10,6 +10,7 @@ from requests.exceptions import MissingSchema, InvalidSchema
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
 DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
+DO_NOT_GO_TO_PLACES_STARTING_WITH = ('#', )
 MAXIMUM_FILE_SIZE = 2e8
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
 
@@ -118,18 +119,20 @@ class Inventory(list):
             except MissingSchema:
                 pass
 
-    def next_node(self, ftext, lev, node, stem, ext, verb, folders,
-                  maxlinks=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
+    def next_node(self, ftext, lev, node, stem, ext, verb, fld,
+                  mlink=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
         node_get = node.get('href')
         if node_get:
             next_url = f"{stem}/{node_get}"
             if node_get.endswith(ext):
-                inv.fetch(next_url, folders)
+                inv.fetch(next_url, fld)
             elif node.string:
                 if not any([node_get.endswith(skipped) for skipped in
                             DO_NOT_GO_TO_PLACES_ENDING_IN]):
-                    if (lev % maxlinks != 0) or (ftext in node.string.lower()):
-                        self.follow(next_url, folders, lev=lev + 1, verb=verb)
+                    if not any([node_get.startswith(skipped) for skipped in
+                            DO_NOT_GO_TO_PLACES_STARTING_WITH]):
+                        if (lev % mlink != 0) or (ftext in node.string.lower()):
+                            self.follow(next_url, fld, lev=lev + 1, verb=verb)
 
 
 if __name__ == "__main__":
