@@ -20,7 +20,7 @@ FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
 
 #State top pages
 VICTORIA_TOP = r"https://www.vec.vic.gov.au/results/state-election-results"
-WEST_AUS_TOP = r"https://www.elections.wa.gov.au/elections/state/sgelection#/"
+WEST_AUS_TOP = r"https://www.elections.wa.gov.au/elections/state"
 SOUTH_AUS_TOP = r"https://www.ecsa.sa.gov.au"
 NSW_TOP = r"https://elections.nsw.gov.au/"
 NORTH_TER_TOP = r"https://ntec.nt.gov.au/"
@@ -29,14 +29,14 @@ ACT_TOP = r"https://www.elections.act.gov.au/"
 QLD_TOP = r"https://www.ecq.qld.gov.au/"
 
 TOP_PAGES = (
-    #FEDERAL_TOP_PAGE,
-    #VICTORIA_TOP,
-    #SOUTH_AUS_TOP,
-    #NSW_TOP,
-    #NORTH_TER_TOP,
-    #TASMANIA_TOP,
-    #ACT_TOP,
-    #QLD_TOP,
+    FEDERAL_TOP_PAGE,
+    VICTORIA_TOP,
+    SOUTH_AUS_TOP,
+    NSW_TOP,
+    NORTH_TER_TOP,
+    TASMANIA_TOP,
+    ACT_TOP,
+    QLD_TOP,
     WEST_AUS_TOP,
 )
 
@@ -84,11 +84,12 @@ class Inventory(list):
     def _download_target(self, header, url, folders):
         content_length = float(header.get(HTML_HEADER_CONTENT_LENGTH_KEY, None))
         if content_length and content_length <= MAXIMUM_FILE_SIZE:
-            self._download_file(url, folders)
+            Inventory._download_file(url, folders)
         else:
             print(f"Didn't download {url}. Size exceeds {MAXIMUM_FILE_SIZE}")
 
-    def _download_file(self, url, folders):
+    @staticmethod
+    def _download_file(url, folders):
         get_request = requests.get(url, allow_redirects=True)
         fname = Inventory.guess_filename(get_request, url)
         if fname:
@@ -130,30 +131,36 @@ class Inventory(list):
 
     def next_node(self, ftext, lev, node, stem, ext, verb, fld,
                   mlink=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
-        try:
-            node_get = node.get('href')
-            if node_get:
-                next_url = f"{stem}/{node_get}"
-                if node_get.endswith(ext):
-                    inv.fetch(next_url, fld)
-                elif node.string:
-                    if (not any([node_get.endswith(skipped) for
-                                 skipped in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
-                            not any([next_url.startswith(skipped) for skipped in
-                                     DO_NOT_GO_TO_PLACES_STARTING_WITH])):
-                        if (lev % mlink != 0) or (ftext in node.string.lower()):
-                            self.follow(next_url, fld, lev=lev + 1, verb=verb)
-        except ssl.SSLCertVerificationError:
-            pass
+        node_get = node.get('href')
+        if node_get:
+            next_url = f"{stem}/{node_get}"
+            if node_get.endswith(ext):
+                inv.fetch(next_url, fld)
+            elif node.string:
+                if (not any([node_get.endswith(skipped) for
+                             skipped in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
+                        not any([next_url.startswith(skipped) for skipped in
+                                 DO_NOT_GO_TO_PLACES_STARTING_WITH])):
+                    if (lev % mlink != 0) or (ftext in node.string.lower()):
+                        self.follow(next_url, fld, lev=lev + 1, verb=verb)
 
 if __name__ == "__main__":
     wordsegment.load()
     inv = Inventory()
     for top_page in TOP_PAGES:
-        for req_node in BeautifulSoup(
-                requests.get(top_page).text, 'html.parser').find_all('a'):
-            if req_node and req_node.string:
-                match = FOLDERS_PATTERN.match(req_node.string.lower())
-                if match:
-                    inv.follow(req_node.get('href'), (match.group(1), "".join([
-                        char for char in match.group(2) if char.isalpha()])))
+        try:
+            for req_node in BeautifulSoup(
+                    requests.get(top_page).text, 'html.parser').find_all('a'):
+                if req_node and req_node.string:
+                    match = FOLDERS_PATTERN.match(req_node.string.lower())
+                    if match:
+                        inv.follow(req_node.get('href'), (
+                            match.group(1), "".join([
+                            char for char in match.group(2) if
+                                char.isalpha()])))
+        except (MissingSchema,
+                ssl.SSLCertVerificationError,
+                requests.exceptions.SSLError,
+                urllib3.exceptions.SSLError,
+                urllib3.exceptions.MaxRetryError):
+            pass
