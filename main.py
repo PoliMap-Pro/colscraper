@@ -6,12 +6,13 @@ import requests
 import wordsegment
 
 from bs4 import BeautifulSoup, ParserRejectedMarkup
-from requests.exceptions import MissingSchema, InvalidSchema
-
+from requests.exceptions import MissingSchema, InvalidSchema, SSLError
+from urllib3.exceptions import MaxRetryError
 
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
 DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
+DO_NOT_GO_TO_PLACES_STARTING_WITH = ('ftp:', )
 MAX_DEPTH = 20
 MAXIMUM_FILE_SIZE = 2e8
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
@@ -119,7 +120,8 @@ class Inventory(list):
                 except (InvalidSchema, ParserRejectedMarkup) as schemaException:
                     if verb:
                         print(f"Didn't download {url}. {str(schemaException)}")
-                except (SSLCertVerificationError, MissingSchema):
+                except (MissingSchema, SSLCertVerificationError, SSLError,
+                        MaxRetryError):
                     pass
 
     def next_node(self, ftext, lev, node, stem, ext, verb, fld,
@@ -130,8 +132,10 @@ class Inventory(list):
             if node_get.endswith(ext):
                 inv.fetch(next_url, fld)
             elif node.string:
-                if not any([node_get.endswith(skipped) for skipped in
-                            DO_NOT_GO_TO_PLACES_ENDING_IN]):
+                if (not any([node_get.endswith(skipped) for
+                             skipped in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
+                        not any([node_get.startswith(skipped) for skipped in
+                                 DO_NOT_GO_TO_PLACES_STARTING_WITH])):
                     if (lev % mlink != 0) or (ftext in node.string.lower()):
                         self.follow(next_url, fld, lev=lev + 1, verb=verb)
 
