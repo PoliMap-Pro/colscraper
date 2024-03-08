@@ -29,13 +29,13 @@ QLD_TOP = r"https://www.ecq.qld.gov.au/"
 TOP_PAGES = (
     FEDERAL_TOP_PAGE,
     VICTORIA_TOP,
-    WEST_AUS_TOP,
     SOUTH_AUS_TOP,
     NSW_TOP,
     NORTH_TER_TOP,
     TASMANIA_TOP,
     ACT_TOP,
     QLD_TOP,
+    WEST_AUS_TOP,
 )
 
 HTML_HEADER_CONTENT_TYPE_KEY = 'content-type'
