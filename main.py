@@ -10,6 +10,7 @@ from requests.exceptions import MissingSchema, InvalidSchema
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 #FOLLOW_LINKS_CONTAINING = ''
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
+DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
 MAXIMUM_FILE_SIZE = 2e8
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
 
@@ -100,25 +101,25 @@ class Inventory(list):
             return F_PAT.findall(get_request.headers[CONT_DISP])[0]
         return url.split("/")[-1]
 
-    def follow(self, url, folders, verbose=True, lev=0, ext='.csv',
+    def follow(self, url, folders, verb=True, lev=0, ext='.csv',
                ftext=FOLLOW_LINKS_CONTAINING):
         if url and self(url):
             try:
                 url_split_on_slashes = url.split("/")
                 stem = "/".join(url_split_on_slashes[:-1])
                 [self.next_node(
-                    ftext, lev, node, stem, ext, verbose, folders) for node in
+                    ftext, lev, node, stem, ext, verb, folders) for node in
                     BeautifulSoup(requests.get(url).text,
                                   'html.parser').find_all('a') if node]
-                if verbose:
+                if verb:
                     print(' '.join([". " * lev, url_split_on_slashes[-1]]))
             except (InvalidSchema, ParserRejectedMarkup) as schemaException:
-                if verbose:
+                if verb:
                     print(f"Didn't download {url}. {str(schemaException)}")
             except MissingSchema:
                 pass
 
-    def next_node(self, ftext, lev, node, stem, ext, verbose, folders,
+    def next_node(self, ftext, lev, node, stem, ext, verb, folders,
                   maxlinks=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
         node_get = node.get('href')
         if node_get:
@@ -126,8 +127,10 @@ class Inventory(list):
             if node_get.endswith(ext):
                 inv.fetch(next_url, folders)
             elif node.string:
-                if (lev % maxlinks != 0) or (ftext in node.string.lower()):
-                    self.follow(next_url, folders, lev=lev + 1, verbose=verbose)
+                if not any([node_get.endswith(skipped) for skipped in
+                         DO_NOT_GO_TO_PLACES_ENDING_IN]):
+                    if (lev % maxlinks != 0) or (ftext in node.string.lower()):
+                        self.follow(next_url, folders, lev=lev + 1, verb=verb)
 
 
 if __name__ == "__main__":
