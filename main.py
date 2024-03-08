@@ -11,9 +11,9 @@ MAXIMUM_FILE_SIZE = 2e8
 
 HTML_HEADER_CONTENT_TYPE_KEY = 'content-type'
 HTML_HEADER_CONTENT_LENGTH_KEY = 'content-length'
-HTML_HEADER_CONTENT_DISPOSITION_KEY = 'content-disposition'
-FILENAME_PATTERN = re.compile(r'filename=(.+)')
-
+CONT_DISP = 'content-disposition'
+F_PAT = re.compile(r'filename=(.+)')
+FOLDERS_PATTERN = re.compile(r'([0-9]+)[^a-z0-9]*(.*)')
 
 class Inventory(list):
     """
@@ -37,74 +37,77 @@ class Inventory(list):
         self.append(new_item)
         return True
 
-    def download_from_url(self, url, check_type=False,
-                          target_type="application/octet-stream"):
+    def fetch(self, url, folders, check_type=False,
+              target_type="application/octet-stream"):
         header = requests.head(url, allow_redirects=True).headers
         if check_type:
             content_type = str(header.get(HTML_HEADER_CONTENT_TYPE_KEY)).lower()
             if content_type == target_type:
-                self._download_target(header, url)
+                self._download_target(header, url, folders)
             else:
                 print(f"Didn't download {url}. Wrong type: {content_type}")
         else:
-            self._download_target(header, url)
+            self._download_target(header, url, folders)
 
-    def _download_target(self, header, url):
+    def _download_target(self, header, url, folders):
         content_length = float(header.get(HTML_HEADER_CONTENT_LENGTH_KEY, None))
         if content_length and content_length <= MAXIMUM_FILE_SIZE:
-            self._download_file(url)
+            self._download_file(url, folders)
         else:
             print(f"Didn't download {url}. Size exceeds {MAXIMUM_FILE_SIZE}")
 
-    def _download_file(self, url):
+    def _download_file(self, url, folders):
         get_request = requests.get(url, allow_redirects=True)
-        filename = Inventory.guess_filename(get_request, url)
-        if filename:
-            target_path = os.path.join(*wordsegment.segment(filename.lower()))
-            os.makedirs(target_path, exist_ok=True)
-            with open(os.path.join(target_path, filename), "wb") as target_file:
+        fname = Inventory.guess_filename(get_request, url)
+        if fname:
+            path = os.path.join(*folders, *wordsegment.segment(fname.lower()))
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, fname), "wb") as target_file:
                 target_file.write(get_request.content)
         else:
-            print(f"Didn't download {url}. Can't guess the filename.")
+            print(f"Didn't download {url}. Can't guess the fname.")
 
     @staticmethod
     def guess_filename(get_request, url):
-        if HTML_HEADER_CONTENT_DISPOSITION_KEY in get_request.headers:
-            return FILENAME_PATTERN.findall(
-                get_request.headers[HTML_HEADER_CONTENT_DISPOSITION_KEY])[0]
+        if CONT_DISP in get_request.headers:
+            return F_PAT.findall(get_request.headers[CONT_DISP])[0]
         return url.split("/")[-1]
 
-    def follow(self, url, verbose=True, level=0, targ_ext='.csv',
-               follow_text='download'):
+    def follow(self, url, folders, verbose=True, lev=0, ext='.csv',
+               ftext='download'):
         if url and self(url):
             url_split_on_slashes = url.split("/")
             try:
                 stem = "/".join(url_split_on_slashes[:-1])
                 [self.next_node(
-                    follow_text, level, node, stem, targ_ext, verbose) for
-                    node in BeautifulSoup(requests.get(url).text,
-                                          'html.parser').find_all('a') if node]
+                    ftext, lev, node, stem, ext, verbose, folders) for node in
+                    BeautifulSoup(requests.get(url).text,
+                                  'html.parser').find_all('a') if node]
                 if verbose:
-                    print(' '.join([". " * level, url_split_on_slashes[-1]]))
+                    print(' '.join([". " * lev, url_split_on_slashes[-1]]))
             except InvalidSchema as schemaException:
                 if verbose:
                     print(f"Didn't download {url}. {str(schemaException)}")
             except MissingSchema:
                 pass
 
-    def next_node(self, follow_text, level, node, stem, target_extension,
-                  verbose):
+    def next_node(self, ftext, lev, node, stem, ext, verbose, folders):
         node_get = node.get('href')
         if node_get:
             next_url = f"{stem}/{node_get}"
-            if node.string and follow_text in node.string.lower():
-                self.follow(next_url, level=level+1, verbose=verbose)
-            if node_get.endswith(target_extension):
-                inv.download_from_url(next_url)
+            if node.string and ftext in node.string.lower():
+                self.follow(next_url, folders, lev=lev + 1, verbose=verbose)
+            if node_get.endswith(ext):
+                inv.fetch(next_url, folders)
 
 
 if __name__ == "__main__":
     wordsegment.load()
     inv = Inventory()
-    [inv.follow(req_node.get('href')) for req_node in BeautifulSoup(
-        requests.get(ELECTIONS_PAGE).text, 'html.parser').find_all('a')]
+    for req_node in BeautifulSoup(
+            requests.get(ELECTIONS_PAGE).text, 'html.parser').find_all('a'):
+        if req_node and req_node.string:
+            match = FOLDERS_PATTERN.match(req_node.string.lower())
+            if match:
+                inv.follow(req_node.get('href'), (match.group(1), "".join([
+                    char for char in match.group(2) if char.isalpha()])))
