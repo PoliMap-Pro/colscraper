@@ -3,17 +3,44 @@ import os
 import requests
 import wordsegment
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, ParserRejectedMarkup
 from requests.exceptions import MissingSchema, InvalidSchema
 
-ELECTIONS_PAGE = r"https://results.aec.gov.au/"
+
+FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
+#FOLLOW_LINKS_CONTAINING = ''
+MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
 MAXIMUM_FILE_SIZE = 2e8
+FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
+
+#State top pages
+VICTORIA_TOP = r"https://www.vec.vic.gov.au/results/state-election-results"
+WEST_AUS_TOP = r"https://www.elections.wa.gov.au/elections/state/sgelection#/"
+SOUTH_AUS_TOP = r"https://www.ecsa.sa.gov.au"
+NSW_TOP = r"https://elections.nsw.gov.au/"
+NORTH_TER_TOP = r"https://ntec.nt.gov.au/"
+TASMANIA_TOP = r"https://www.tec.tas.gov.au/"
+ACT_TOP = r"https://www.elections.act.gov.au/"
+QLD_TOP = r"https://www.ecq.qld.gov.au/"
+
+TOP_PAGES = (
+    FEDERAL_TOP_PAGE,
+    VICTORIA_TOP,
+    WEST_AUS_TOP,
+    SOUTH_AUS_TOP,
+    NSW_TOP,
+    NORTH_TER_TOP,
+    TASMANIA_TOP,
+    ACT_TOP,
+    QLD_TOP,
+)
 
 HTML_HEADER_CONTENT_TYPE_KEY = 'content-type'
 HTML_HEADER_CONTENT_LENGTH_KEY = 'content-length'
 CONT_DISP = 'content-disposition'
 F_PAT = re.compile(r'filename=(.+)')
 FOLDERS_PATTERN = re.compile(r'([0-9]+)[^a-z0-9]*(.*)')
+
 
 class Inventory(list):
     """
@@ -74,10 +101,10 @@ class Inventory(list):
         return url.split("/")[-1]
 
     def follow(self, url, folders, verbose=True, lev=0, ext='.csv',
-               ftext='download'):
+               ftext=FOLLOW_LINKS_CONTAINING):
         if url and self(url):
-            url_split_on_slashes = url.split("/")
             try:
+                url_split_on_slashes = url.split("/")
                 stem = "/".join(url_split_on_slashes[:-1])
                 [self.next_node(
                     ftext, lev, node, stem, ext, verbose, folders) for node in
@@ -85,29 +112,32 @@ class Inventory(list):
                                   'html.parser').find_all('a') if node]
                 if verbose:
                     print(' '.join([". " * lev, url_split_on_slashes[-1]]))
-            except InvalidSchema as schemaException:
+            except (InvalidSchema, ParserRejectedMarkup) as schemaException:
                 if verbose:
                     print(f"Didn't download {url}. {str(schemaException)}")
             except MissingSchema:
                 pass
 
-    def next_node(self, ftext, lev, node, stem, ext, verbose, folders):
+    def next_node(self, ftext, lev, node, stem, ext, verbose, folders,
+                  maxlinks=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
         node_get = node.get('href')
         if node_get:
             next_url = f"{stem}/{node_get}"
-            if node.string and ftext in node.string.lower():
-                self.follow(next_url, folders, lev=lev + 1, verbose=verbose)
             if node_get.endswith(ext):
                 inv.fetch(next_url, folders)
+            elif node.string:
+                if (lev % maxlinks != 0) or (ftext in node.string.lower()):
+                    self.follow(next_url, folders, lev=lev + 1, verbose=verbose)
 
 
 if __name__ == "__main__":
     wordsegment.load()
     inv = Inventory()
-    for req_node in BeautifulSoup(
-            requests.get(ELECTIONS_PAGE).text, 'html.parser').find_all('a'):
-        if req_node and req_node.string:
-            match = FOLDERS_PATTERN.match(req_node.string.lower())
-            if match:
-                inv.follow(req_node.get('href'), (match.group(1), "".join([
-                    char for char in match.group(2) if char.isalpha()])))
+    for top_page in TOP_PAGES:
+        for req_node in BeautifulSoup(
+                requests.get(top_page).text, 'html.parser').find_all('a'):
+            if req_node and req_node.string:
+                match = FOLDERS_PATTERN.match(req_node.string.lower())
+                if match:
+                    inv.follow(req_node.get('href'), (match.group(1), "".join([
+                        char for char in match.group(2) if char.isalpha()])))
