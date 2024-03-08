@@ -10,7 +10,6 @@ from requests.exceptions import MissingSchema, InvalidSchema
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
 DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
-DO_NOT_GO_TO_PLACES_STARTING_WITH = ('#', )
 MAX_DEPTH = 20
 MAXIMUM_FILE_SIZE = 2e8
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
@@ -131,10 +130,8 @@ class Inventory(list):
             elif node.string:
                 if not any([node_get.endswith(skipped) for skipped in
                             DO_NOT_GO_TO_PLACES_ENDING_IN]):
-                    if not any([node_get.startswith(skipped) for skipped in
-                            DO_NOT_GO_TO_PLACES_STARTING_WITH]):
-                        if (lev % mlink != 0) or (ftext in node.string.lower()):
-                            self.follow(next_url, fld, lev=lev + 1, verb=verb)
+                    if (lev % mlink != 0) or (ftext in node.string.lower()):
+                        self.follow(next_url, fld, lev=lev + 1, verb=verb)
 
 
 if __name__ == "__main__":
