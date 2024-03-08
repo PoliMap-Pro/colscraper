@@ -1,5 +1,7 @@
 import re
 import os
+from ssl import SSLCertVerificationError
+
 import requests
 import wordsegment
 
@@ -117,7 +119,7 @@ class Inventory(list):
                 except (InvalidSchema, ParserRejectedMarkup) as schemaException:
                     if verb:
                         print(f"Didn't download {url}. {str(schemaException)}")
-                except MissingSchema:
+                except (SSLCertVerificationError, MissingSchema):
                     pass
 
     def next_node(self, ftext, lev, node, stem, ext, verb, fld,
