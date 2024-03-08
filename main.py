@@ -8,7 +8,6 @@ from requests.exceptions import MissingSchema, InvalidSchema
 
 
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
-#FOLLOW_LINKS_CONTAINING = ''
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 2
 DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
 MAXIMUM_FILE_SIZE = 2e8
@@ -128,7 +127,7 @@ class Inventory(list):
                 inv.fetch(next_url, folders)
             elif node.string:
                 if not any([node_get.endswith(skipped) for skipped in
-                         DO_NOT_GO_TO_PLACES_ENDING_IN]):
+                            DO_NOT_GO_TO_PLACES_ENDING_IN]):
                     if (lev % maxlinks != 0) or (ftext in node.string.lower()):
                         self.follow(next_url, folders, lev=lev + 1, verb=verb)
 
