@@ -47,6 +47,7 @@ class Inventory(list):
         if new_item in self:
             return False
         self.append(new_item)
+        self._sorted = False
         return True
 
     def follow(self, url, folders, verb=True, lev=0, ext=TARGET_EXTENSIONS,
