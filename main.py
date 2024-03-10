@@ -11,14 +11,14 @@ from requests.exceptions import MissingSchema, InvalidSchema
 
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
 MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 3
-DO_NOT_GO_TO_PLACES_ENDING_IN = ('.txt', ".pdf", )
+DO_NOT_GO_TO_PLACES_ENDING_IN = ('.txt', '.pdf', )
 DO_NOT_GO_TO_PLACES_STARTING_WITH = ('ftp:', 'tel:', )
 TARGET_EXTENSIONS = ('.csv', '.xls', '.ashx', '.zip' )
 MAX_DEPTH = 20
 MAXIMUM_FILE_SIZE = 2e8
 
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
-TOP_PAGES = (FEDERAL_TOP_PAGE,)
+TOP_PAGES = (FEDERAL_TOP_PAGE, )
 
 CONTENT_TYPE_KEY = 'content-type'
 HTML_HEADER_CONTENT_LENGTH_KEY = 'content-length'
@@ -135,6 +135,6 @@ class Inventory(list):
 if __name__ == "__main__":
     wordsegment.load()
     inv = Inventory()
-    [inv.get_year(req_node) for top_page in TOP_PAGES for req_node in
+    [inv.get_year(node) for top_page in TOP_PAGES for node in
      BeautifulSoup(requests.get(top_page).text, 'html.parser').find_all('a')
-     if req_node and req_node.string]
+     if node and node.string]
