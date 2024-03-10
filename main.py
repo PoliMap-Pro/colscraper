@@ -10,10 +10,10 @@ from bs4 import BeautifulSoup, ParserRejectedMarkup
 from requests.exceptions import MissingSchema, InvalidSchema
 
 FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
-MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 4
-DO_NOT_GO_TO_PLACES_ENDING_IN = ('.zip', '.txt', )
+MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 3
+DO_NOT_GO_TO_PLACES_ENDING_IN = ('.txt', ".pdf", )
 DO_NOT_GO_TO_PLACES_STARTING_WITH = ('ftp:', 'tel:', )
-TARGET_EXTENSIONS = ('.csv', '.xls', '.ashx', )
+TARGET_EXTENSIONS = ('.csv', '.xls', '.ashx', '.zip' )
 MAX_DEPTH = 20
 MAXIMUM_FILE_SIZE = 2e8
 
@@ -71,6 +71,12 @@ class Inventory(list):
                         urllib3.exceptions.MaxRetryError):
                     pass
 
+    def get_year(self, node):
+        match = FOLDERS_PATTERN.match(node.string.lower())
+        if match:
+            self.follow(node.get('href'), (match.group(1), "".join([
+                char for char in match.group(2) if char.isalpha()])))
+
     def fetch(self, url, folders, check_type=False,
               target_type="application/octet-stream"):
         if self(url):
@@ -87,9 +93,21 @@ class Inventory(list):
     def _download_target(self, header, url, folders):
         content_length = float(header.get(HTML_HEADER_CONTENT_LENGTH_KEY, None))
         if content_length and content_length <= MAXIMUM_FILE_SIZE:
-            Inventory._download_file(url, folders)
+            self._download_file(url, folders)
         else:
             print(f"Didn't download {url}. Size exceeds {MAXIMUM_FILE_SIZE}")
+
+    def _download_file(self, url, fold):
+        get_request = requests.get(url, allow_redirects=True)
+        fname = Inventory._guess_filename(get_request, url)
+        if fname:
+            if self(fname):
+                path = os.path.join(*fold, *wordsegment.segment(fname.lower()))
+                os.makedirs(path, exist_ok=True)
+                with open(os.path.join(path, fname), "wb") as target_file:
+                    target_file.write(get_request.content)
+        else:
+            print(f"Didn't download {url}. Can't guess the fname.")
 
     def _next_node(self, ftext, lev, node, stem, ext, verb, fld,
                    mlink=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
@@ -106,24 +124,6 @@ class Inventory(list):
                     if (lev == 0) or ((lev % mlink) != 0) or (
                             ftext in node.string.lower()):
                         self.follow(next_url, fld, lev=lev + 1, verb=verb)
-
-    def get_year(self, node):
-        match = FOLDERS_PATTERN.match(node.string.lower())
-        if match:
-            self.follow(node.get('href'), (match.group(1), "".join([
-                char for char in match.group(2) if char.isalpha()])))
-
-    @staticmethod
-    def _download_file(url, folders):
-        get_request = requests.get(url, allow_redirects=True)
-        fname = Inventory._guess_filename(get_request, url)
-        if fname:
-            path = os.path.join(*folders, *wordsegment.segment(fname.lower()))
-            os.makedirs(path, exist_ok=True)
-            with open(os.path.join(path, fname), "wb") as target_file:
-                target_file.write(get_request.content)
-        else:
-            print(f"Didn't download {url}. Can't guess the fname.")
 
     @staticmethod
     def _guess_filename(get_request, url):
