@@ -9,12 +9,29 @@ import wordsegment
 from bs4 import BeautifulSoup, ParserRejectedMarkup
 from requests.exceptions import MissingSchema, InvalidSchema
 
-FOLLOW_LINKS_CONTAINING = 'download'  # use empty string to follow all
-MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT = 3
 DO_NOT_GO_TO_PLACES_ENDING_IN = ('.txt', '.pdf', )
-DO_NOT_GO_TO_PLACES_STARTING_WITH = ('ftp:', 'tel:', )
+DO_NOT_GO_TO_PLACES_CONTAINING = (
+    'app-store',
+    'apple.com',
+    'facebook.com',
+    'ftp:',
+    'google.com',
+    'imprint.html',
+    'mailto:',
+    'mozilla.org',
+    'nextspaceflight.com',
+    'osdm.gov.au',
+    'planetaryscale.com',
+    'reuters.com',
+    'reutersagency.com',
+    'spatial.gov.au',
+    'tel:',
+    'twtr-main',
+    'webtobeck.tk',
+    'wymt.com',
+)
 TARGET_EXTENSIONS = ('.csv', '.xls', '.ashx', '.zip' )
-MAX_DEPTH = 20
+MAX_DEPTH = 15
 MAXIMUM_FILE_SIZE = 2e8
 
 FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
@@ -33,9 +50,11 @@ class Inventory(list):
     order
     """
 
-    def __init__(self):
+    def __init__(self, target_links='download', max_between=2, ):
         list.__init__(self)
         self._sorted = False
+        self.target_links = target_links
+        self.max_between = max_between
 
     def __iter__(self):
         if not self._sorted:
@@ -51,26 +70,37 @@ class Inventory(list):
         return True
 
     def follow(self, url, folders, verb=True, lev=0, ext=TARGET_EXTENSIONS,
-               ftext=FOLLOW_LINKS_CONTAINING, max_depth=MAX_DEPTH):
+               max_depth=MAX_DEPTH):
         if url and self(url):
             if lev < max_depth:
                 try:
-                    url_split_on_slashes = url.split("/")
-                    stem = "/".join(url_split_on_slashes[:-1])
-                    [self._next_node(
-                        ftext, lev, node, stem, ext, verb, folders) for node in
-                        BeautifulSoup(requests.get(url).text,
-                                      'html.parser').find_all('a') if node]
+                    url_split_on_slashes = self._get_next_nodes(ext, folders,
+                                                                lev, url, verb)
                     if verb:
-                        print(' '.join([". " * lev, url_split_on_slashes[-1]]))
+                        if url_split_on_slashes[-1]:
+                            page_name = url_split_on_slashes[-1]
+                        else:
+                            page_name = url
+                        print(' '.join([". " * lev, page_name]))
                 except (InvalidSchema, ParserRejectedMarkup) as schemaException:
                     if verb:
                         print(f"Didn't download {url}. {str(schemaException)}")
                 except (MissingSchema, ssl.SSLCertVerificationError,
                         requests.exceptions.SSLError,
+                        requests.exceptions.TooManyRedirects,
                         urllib3.exceptions.SSLError,
-                        urllib3.exceptions.MaxRetryError):
+                        urllib3.exceptions.MaxRetryError,
+                        urllib3.exceptions.NameResolutionError, ):
                     pass
+
+    def _get_next_nodes(self, ext, folders, lev, url, verb):
+        result = url.split("/")
+        stem = "/".join(result[:-1])
+        [self._next_node(
+            lev, node, stem, ext, verb, folders) for node in
+            BeautifulSoup(requests.get(url).text,
+                          'html.parser').find_all('a') if node]
+        return result
 
     def get_year(self, node):
         match = FOLDERS_PATTERN.match(node.string.lower())
@@ -110,21 +140,26 @@ class Inventory(list):
         else:
             print(f"Didn't download {url}. Can't guess the fname.")
 
-    def _next_node(self, ftext, lev, node, stem, ext, verb, fld,
-                   mlink=MAXIMUM_LINKS_BETWEEN_LINKS_CONTAINING_TARGET_TEXT):
-        node_get = node.get('href')
-        if node_get:
-            next_url = f"{stem}/{node_get}"
-            if any([node_get.endswith(target) for target in ext]):
-                inv.fetch(next_url, fld)
-            elif node.string:
-                if (not any([node_get.endswith(skipped) for
-                             skipped in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
-                        not any([next_url.startswith(skipped) for skipped in
-                                 DO_NOT_GO_TO_PLACES_STARTING_WITH])):
-                    if (lev == 0) or ((lev % mlink) != 0) or (
-                            ftext in node.string.lower()):
-                        self.follow(next_url, fld, lev=lev + 1, verb=verb)
+    def _next_node(self, lev, node, stem, ext, verb, fld):
+        nget = node.get('href')
+        if nget:
+            nget = node.get('href').lower()
+            if not any([skp in nget for skp in DO_NOT_GO_TO_PLACES_CONTAINING]):
+                if nget.startswith('http'):
+                    next_url = nget
+                else:
+                    next_url = f"{stem}/{nget}"
+                if any([nget.endswith(target) for target in ext]):
+                    inv.fetch(next_url, fld)
+                elif node.string:
+                    if (not any([nget.endswith(skip) for
+                                 skip in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
+                            not any([skip in next_url for skip in
+                                     DO_NOT_GO_TO_PLACES_CONTAINING])):
+                        if (not self.target_links) or (lev == 0) or (
+                                (lev % self.max_between) != 0) or (
+                                self.target_links in node.string.lower()):
+                            self.follow(next_url, fld, lev=lev + 1, verb=verb)
 
     @staticmethod
     def _guess_filename(get_request, url):
