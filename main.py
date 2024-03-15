@@ -1,165 +1,141 @@
-import re
 import os
-import urllib3
-import ssl
-
 import requests
 import wordsegment
 
+from constants import TYPE_KEY, LENGTH_KEY, CONT_DISP, F_PAT, FOLDERS_PATTERN, \
+    GET_EXCEPT, DO_NOT_GO_TO_PLACES_ENDING_IN, DO_NOT_GO_TO_PLACES_CONTAINING
 from bs4 import BeautifulSoup, ParserRejectedMarkup
-from requests.exceptions import MissingSchema, InvalidSchema
+from requests.exceptions import InvalidSchema
 
-DO_NOT_GO_TO_PLACES_ENDING_IN = ('.txt', '.pdf', )
-DO_NOT_GO_TO_PLACES_CONTAINING = (
-    'app-store',
-    'apple.com',
-    'facebook.com',
-    'ftp:',
-    'google.com',
-    'imprint.html',
-    'mailto:',
-    'mozilla.org',
-    'nextspaceflight.com',
-    'osdm.gov.au',
-    'planetaryscale.com',
-    'reuters.com',
-    'reutersagency.com',
-    'spatial.gov.au',
-    'tel:',
-    'twtr-main',
-    'webtobeck.tk',
-    'wymt.com',
-)
-TARGET_EXTENSIONS = ('.csv', '.xls', '.ashx', '.zip' )
-MAX_DEPTH = 15
-MAXIMUM_FILE_SIZE = 2e8
+TOP = (r"https://results.aec.gov.au/", )
+TARGET_EXTENSIONS = ('.csv', '.xls', '.xlsx', '.ashx', '.zip', )
 
-FEDERAL_TOP_PAGE = r"https://results.aec.gov.au/"
-TOP_PAGES = (FEDERAL_TOP_PAGE, )
 
-CONTENT_TYPE_KEY = 'content-type'
-HTML_HEADER_CONTENT_LENGTH_KEY = 'content-length'
-CONT_DISP = 'content-disposition'
-F_PAT = re.compile(r'filename=(.+)')
-FOLDERS_PATTERN = re.compile(r'([0-9]+)[^a-z0-9]*(.*)')
+class Tally(dict):
+    def __setitem__(self, key, value):
+        if key in self:
+            dict.__setitem__(self, key, self[key] + value)
+        else:
+            dict.__setitem__(self, key, value)
 
 
 class Inventory(list):
-    """
-    List of items. __iter__() method returns elements in alphabetical
-    order
-    """
-
-    def __init__(self, target_links='download', max_between=2, ):
+    def __init__(self, target='download', between=2, depth=15, size=2e8):
         list.__init__(self)
-        self._sorted = False
-        self.target_links = target_links
-        self.max_between = max_between
-
-    def __iter__(self):
-        if not self._sorted:
-            self.sort()
-            self._sorted = True
-        return list.__iter__(self)
+        self.target_links = target
+        self.max_between, self.max_depth, self.max_size = between, depth, size
 
     def __call__(self, new_item):
         if new_item in self:
             return False
         self.append(new_item)
-        self._sorted = False
         return True
 
-    def follow(self, url, folders, verb=True, lev=0, ext=TARGET_EXTENSIONS,
-               max_depth=MAX_DEPTH):
-        if url and self(url):
-            if lev < max_depth:
-                try:
-                    url_split_on_slashes = self._get_next_nodes(ext, folders,
-                                                                lev, url, verb)
-                    if verb:
-                        if url_split_on_slashes[-1]:
-                            page_name = url_split_on_slashes[-1]
-                        else:
-                            page_name = url
-                        print(' '.join([". " * lev, page_name]))
-                except (InvalidSchema, ParserRejectedMarkup) as schemaException:
-                    if verb:
-                        print(f"Didn't download {url}. {str(schemaException)}")
-                except (MissingSchema, ssl.SSLCertVerificationError,
-                        requests.exceptions.SSLError,
-                        requests.exceptions.TooManyRedirects,
-                        urllib3.exceptions.SSLError,
-                        urllib3.exceptions.MaxRetryError,
-                        urllib3.exceptions.NameResolutionError, ):
-                    pass
+    def follow(self, url, folders, verb=True, lev=0, ext=TARGET_EXTENSIONS):
+        if url:
+            url = url.replace(r"///", r"/")
+            if self(url):
+                if lev < self.max_depth:
+                    try:
+                        self.tick(ext, folders, lev, url, verb)
+                    except (InvalidSchema, ParserRejectedMarkup) as exception:
+                        if verb:
+                            print(f"Didn't download {url}. {str(exception)}")
+                    except GET_EXCEPT:
+                        pass
 
-    def _get_next_nodes(self, ext, folders, lev, url, verb):
+    def tick(self, ext, folders, lev, url, verb):
+        usplit = self._get_next_nodes(ext, folders, lev, url, verb)
+        if verb:
+            print(' '.join([". " * lev, usplit[-1] if usplit[-1] else url]))
+
+    def _get_next_nodes(self, ext, fold, lev, url, verb, parse='html.parser'):
         result = url.split("/")
         stem = "/".join(result[:-1])
-        [self._next_node(
-            lev, node, stem, ext, verb, folders) for node in
-            BeautifulSoup(requests.get(url).text,
-                          'html.parser').find_all('a') if node]
+        try:
+            [self._next_node(lev, node, stem, ext, verb, fold) for node in
+             BeautifulSoup(requests.get(url).text, parse).find_all('a') if node]
+        except GET_EXCEPT:
+            pass
         return result
 
-    def get_year(self, node):
+    def get_year(self, node, getrib='href', year_group=1, char_group=2):
         match = FOLDERS_PATTERN.match(node.string.lower())
         if match:
-            self.follow(node.get('href'), (match.group(1), "".join([
-                char for char in match.group(2) if char.isalpha()])))
+            self.follow(node.get(getrib), (match.group(year_group), "".join([
+                char for char in match.group(char_group) if char.isalpha()])))
 
-    def fetch(self, url, folders, check_type=False,
-              target_type="application/octet-stream"):
+    def fetch(self, url, fold, check=False, target="application/octet-stream"):
         if self(url):
-            header = requests.head(url, allow_redirects=True).headers
-            if check_type:
-                content_type = str(header.get(CONTENT_TYPE_KEY)).lower()
-                if content_type == target_type:
-                    self._download_target(header, url, folders)
+            try:
+                header = requests.head(url, allow_redirects=True).headers
+                if check and target != str(header.get(TYPE_KEY)).lower():
+                    print(f"Didn't download {url}. Not {target}.")
                 else:
-                    print(f"Didn't download {url}. Wrong type: {content_type}")
-            else:
-                self._download_target(header, url, folders)
+                    self._download_target(header, url, fold)
+            except GET_EXCEPT:
+                pass
 
     def _download_target(self, header, url, folders):
-        content_length = float(header.get(HTML_HEADER_CONTENT_LENGTH_KEY, None))
-        if content_length and content_length <= MAXIMUM_FILE_SIZE:
-            self._download_file(url, folders)
-        else:
-            print(f"Didn't download {url}. Size exceeds {MAXIMUM_FILE_SIZE}")
+        length_string = header.get(LENGTH_KEY, None)
+        if length_string:
+            content_length = float(length_string)
+            if content_length and content_length <= self.max_size:
+                self._download_file(url, folders)
+            else:
+                print(f"Didn't download {url}. Size exceeds {self.max_size}")
 
     def _download_file(self, url, fold):
-        get_request = requests.get(url, allow_redirects=True)
-        fname = Inventory._guess_filename(get_request, url)
-        if fname:
-            if self(fname):
-                path = os.path.join(*fold, *wordsegment.segment(fname.lower()))
-                os.makedirs(path, exist_ok=True)
-                with open(os.path.join(path, fname), "wb") as target_file:
-                    target_file.write(get_request.content)
-        else:
-            print(f"Didn't download {url}. Can't guess the fname.")
+        try:
+            get_request = requests.get(url, allow_redirects=True)
+            fname = Inventory._guess_filename(get_request, url)
+            if fname:
+                self._write_file(fname, fold, get_request)
+            else:
+                print(f"Didn't download {url}. Can't guess the filename.")
+        except GET_EXCEPT:
+            pass
 
-    def _next_node(self, lev, node, stem, ext, verb, fld):
-        nget = node.get('href')
+    def _write_file(self, fname, fold, get_request, write_code="wb"):
+        if self(fname):
+            path = os.path.join(*fold, *wordsegment.segment(fname.lower()))
+            os.makedirs(path, exist_ok=True)
+            try:
+                with open(os.path.join(path, fname), write_code) as target_file:
+                    target_file.write(get_request.content)
+            except OSError:
+                pass
+
+    def _next_node(self, lev, node, stem, ext, verb, fld, getrib="href"):
+        nget = node.get(getrib)
         if nget:
-            nget = node.get('href').lower()
+            nget = nget.lower()
             if not any([skp in nget for skp in DO_NOT_GO_TO_PLACES_CONTAINING]):
-                if nget.startswith('http'):
-                    next_url = nget
-                else:
-                    next_url = f"{stem}/{nget}"
-                if any([nget.endswith(target) for target in ext]):
-                    inv.fetch(next_url, fld)
-                elif node.string:
-                    if (not any([nget.endswith(skip) for
-                                 skip in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
-                            not any([skip in next_url for skip in
-                                     DO_NOT_GO_TO_PLACES_CONTAINING])):
-                        if (not self.target_links) or (lev == 0) or (
-                                (lev % self.max_between) != 0) or (
-                                self.target_links in node.string.lower()):
-                            self.follow(next_url, fld, lev=lev + 1, verb=verb)
+                self._check_next_url(ext, fld, lev, nget, node, stem, verb)
+
+    def _check_next_url(self, ext, fld, lev, nget, node, stem, verb):
+        next_url = nget if nget.startswith('http') else f"{stem}/{nget}"
+        fragment_counts = Tally()
+        for fragment in next_url.split("/"):
+            if fragment and len(fragment) > 1:
+                fragment_counts[fragment] = 1
+                if fragment_counts[fragment] > 2:
+                    return False
+        if any([nget.endswith(target) for target in ext]):
+            self.fetch(next_url, fld)
+        elif node.string:
+            self._check_follow(fld, lev, next_url, nget, node, verb)
+        return True
+
+    def _check_follow(self, fld, lev, next_url, nget, node, verb):
+        if (not any([nget.endswith(skip) for
+                     skip in DO_NOT_GO_TO_PLACES_ENDING_IN])) and (
+                not any([skip in next_url for skip in
+                         DO_NOT_GO_TO_PLACES_CONTAINING])):
+            if (not self.target_links) or (lev == 0) or (
+                    (lev % self.max_between) != 0) or (
+                    self.target_links in node.string.lower()):
+                self.follow(next_url, fld, lev=lev + 1, verb=verb)
 
     @staticmethod
     def _guess_filename(get_request, url):
@@ -171,6 +147,5 @@ class Inventory(list):
 if __name__ == "__main__":
     wordsegment.load()
     inv = Inventory()
-    [inv.get_year(node) for top_page in TOP_PAGES for node in
-     BeautifulSoup(requests.get(top_page).text, 'html.parser').find_all('a')
-     if node and node.string]
+    [inv.get_year(node) for top in TOP for node in BeautifulSoup(requests.get(
+        top).text, 'html.parser').find_all('a') if node and node.string]
